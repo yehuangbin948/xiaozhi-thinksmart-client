@@ -4,6 +4,7 @@ waits for the first connect instead of opening another.
 Run like test_barge_in.py (it stubs the audio stack; importing it first does that here too).
 """
 import asyncio
+import json
 
 import pytest
 
@@ -93,3 +94,25 @@ async def test_a_handler_error_closes_the_connection_it_gives_up_on():
     ws = hub.ws = FakeWs(['{"type": "server"}'])
     await hub._read(ws)
     assert ws.closed and closed and not hub.connected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('prefixes', [(), ('小麦小麦', '你好小智')])
+async def test_hello_announces_only_configured_wake_prefixes(monkeypatch, prefixes):
+    from thinksmart_client import hub as module
+    sent = []
+    class Ws(FakeWs):
+        async def send(self, message): sent.append(json.loads(message))
+        async def recv(self): return '{"type":"hello","session_id":"test"}'
+    ws = Ws([])
+    async def connect(*args, **kwargs): return ws
+    async def closed(): pass
+    monkeypatch.setattr(module, 'connect', connect)
+    hub = module.Hub('ws://x', 'd', 'c', 't', closed, lambda b: None, closed,
+                     wake_prefixes=prefixes)
+    await hub.connect()
+    if prefixes:
+        assert sent[0]['features']['wake_prefixes'] == list(prefixes)
+    else:
+        assert 'wake_prefixes' not in sent[0]['features']
+    await hub._reader

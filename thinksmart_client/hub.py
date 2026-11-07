@@ -15,7 +15,7 @@ log = logging.getLogger(__name__)
 
 
 class Hub:
-    def __init__(self, url, device_id, client_id, token, on_json, on_audio, on_closed):
+    def __init__(self, url, device_id, client_id, token, on_json, on_audio, on_closed, wake_prefixes=()):
         self.url = url
         self.headers = {'Authorization': f'Bearer {token}', 'Protocol-Version': '1',
                         'Device-Id': device_id, 'Client-Id': client_id}
@@ -25,6 +25,7 @@ class Hub:
         self.audio_params = {'sample_rate': 24000, 'frame_duration': 60}
         self._reader = None
         self.features = {}
+        self.wake_prefixes = [p for p in wake_prefixes if isinstance(p,str) and 0<len(p)<=24][:10]
 
     @property
     def connected(self):
@@ -42,7 +43,8 @@ class Hub:
             # vad_end: the hub says when its VAD decides the user finished (the page shows "recognising")
             # ready_on_tts_start: messages and audio are handled in order, so audio right after "tts start"
             # plays (the hub need not wait before a cached reply such as "我在")
-            'features': {'mcp': True, 'vad_end': True, 'ready_on_tts_start': True},
+            'features': {'mcp': True, 'vad_end': True, 'ready_on_tts_start': True,
+                         **({'wake_prefixes': self.wake_prefixes} if self.wake_prefixes else {})},
             'audio_params': {'format': 'opus', 'sample_rate': 16000, 'channels': 1, 'frame_duration': 20},
         }))
         try:

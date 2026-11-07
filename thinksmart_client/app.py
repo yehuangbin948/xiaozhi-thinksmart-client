@@ -28,6 +28,7 @@ States shown to the page: idle, connecting, listening, thinking, speaking.
   the conversation was doing. The volume keys then change only that ring's volume.
 """
 import asyncio
+import collections
 import io
 import json
 import logging
@@ -203,13 +204,15 @@ class Client:
                        cfg['kws_score'], cfg['kws_threshold'], cfg['kws_paths'], cfg['kws_gain_db'])
         self.verifier = wake_verify.make(cfg['wake_verify'], cfg['wake_words'], cfg['hub_http'])
         self.backlog = None           # mic blocks since a wake word hit, uploaded once listening starts
+        self._wake_audio = collections.deque(maxlen=50)  # 1 s before the delayed keyword result
         self.audio = Audio(self._on_block)
         from .music import Music
         self.music = Music(self.audio, self.events.publish,
                            lambda: self.state != 'idle' or bool(self.ring) or bool(self.preview)
                            or self.audio.player.buffered() > .03)
         self.hub = Hub(cfg['hub_ws'], cfg['device_id'], cfg['client_id'], cfg['token'],
-                       self._on_json, self._on_audio, self._on_closed)
+                       self._on_json, self._on_audio, self._on_closed,
+                       wake_prefixes=[w.split('@')[-1].strip() for w in cfg['wake_words']])
         sounds = ROOT / 'web' / 'sounds'
         # Wake: two rising marimba notes; goodbye is the same two falling
         self.sounds = {'wake': marimba([G5, D6], 0.09), 'bye': marimba([D6, G5], 0.12, 0.16),
@@ -276,6 +279,8 @@ class Client:
     # ---- microphone (worker thread) ----
 
     def _on_block(self, block, wake_block):
+        if not hasattr(self, '_wake_audio'): self._wake_audio = collections.deque(maxlen=50)
+        self._wake_audio.append(wake_block.copy())
         # While streaming to the hub the wake word isn't needed (speech already reaches it), and
         # the CPU it would take is better left to the hub's speech recognition. wake_block: what the
         # wake word hears (during a reply, echo-cancelled without suppressing the voice; audio.py)
@@ -288,7 +293,10 @@ class Client:
                 self.uploading = False   # keep what follows for the new question, not the old one
             # keep what follows: checking the hit, the chime and connecting take a moment, and
             # "小麦小麦，今天..." is often said in one go
-            self.backlog = []
+            # The keyword model reports ~0.4 s after the word ended. A command
+            # spoken in the same breath has already begun by then.
+            self.backlog = list(self._wake_audio)
+            self._wake_audio.clear()
             audio = self.kws.recent()
             self.loop.call_soon_threadsafe(lambda: asyncio.create_task(self.voice_wake(hit, audio)))
         elif backlog is not None and not self.uploading:
@@ -565,7 +573,7 @@ class Client:
             log.info('the hub confirmed the abort after %.0f ms', (time.monotonic() - self.abort_pending) * 1000)
             self.abort_pending = None
             return True   # our own abort: what comes next was already decided
-        if kind == 'stt' or (kind == 'tts' and state in ('start', 'sentence_start')):
+        if kind in ('stt', 'wake_ready') or (kind == 'tts' and state in ('start', 'sentence_start')):
             log.info('dropped from the interrupted turn: %s %s', kind, state or msg.get('text'))
             return True
         return False
@@ -574,7 +582,16 @@ class Client:
         kind = msg.get('type')
         if self._stale(msg):
             return
-        if kind == 'stt':
+        if kind == 'wake_ready':
+            # A pre-roll containing only the wake word needs more speech, not
+            # a model response. The client has already played its local chime.
+            if self.hub.connected and (self.uploading or self.recognising or self.awaiting_text):
+                if not self.uploading: await self.start_listening('realtime')
+                self.recognising = self.vad_ended = self.awaiting_text = self.hub_pending = False
+                self.heard = False
+                self.deadline = time.monotonic() + self.cfg['follow_up_seconds']
+                self.set_state('listening')
+        elif kind == 'stt':
             text = (msg.get('text') or '').strip()
             if text.startswith('% '):
                 # not speech: the hub's note that the model calls a tool (for the screens of ESP32 boards)

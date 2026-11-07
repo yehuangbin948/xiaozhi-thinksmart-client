@@ -54,13 +54,57 @@ async def test_wake_word_is_listened_for_once_the_hub_is_recognising():
     assert c.kws.fed == 1
     c.kws.hit = '小麦小麦'
     c._on_block(block(), block())
-    assert not c.uploading and c.backlog == []   # what follows is kept for the new question
+    assert not c.uploading and len(c.backlog) == 3  # also keep speech before the delayed hit
     await asyncio.sleep(0)
     await asyncio.sleep(0)
     assert woke == ['小麦小麦']
     c.kws.hit = None
     c._on_block(block(), block())
-    assert len(c.backlog) == 1
+    assert len(c.backlog) == 4
+
+
+@pytest.mark.asyncio
+async def test_delayed_wake_preserves_one_second_and_sends_each_frame_once():
+    c = make_client()
+    c.kws, c.backlog = FakeKws(), None
+    c.loop = asyncio.get_running_loop()
+    c._send_q = asyncio.Queue(100)
+    encoded = []
+    c.encoder = type('E', (), {'encode': lambda self, pcm: encoded.append(pcm.copy()) or b'opus'})()
+
+    async def wake(*args): pass
+    c.voice_wake = wake
+    for n in range(1, 62):
+        if n == 61: c.kws.hit = '小麦小麦'
+        # wake audio retains the voice even when the ordinary ASR path suppresses it
+        c._on_block(block(), np.full(320, n / 128, np.float32))
+    assert len(c.backlog) == 50
+    c.kws.hit = None
+    c.uploading = True
+    c._on_block(np.full(320, 62 / 128, np.float32), block())
+    assert len(encoded) == 51
+    assert [int(pcm[0]) for pcm in encoded] == [n * 256 for n in range(12, 63)]
+    assert c.backlog is None
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('closed_mic', [False, True])
+async def test_wake_only_recognition_keeps_listening_for_the_command(closed_mic):
+    c = make_client()
+    await said_and_recognising(c)
+    if closed_mic:
+        c.uploading, c.awaiting_text = False, True
+        c.set_state('thinking')
+    await c._on_json({'type': 'wake_ready'})
+    assert c.uploading and c.state == 'listening'
+    assert not c.recognising and not c.awaiting_text and not c.hub_pending
+    assert c.deadline and c.threads == {}
+    await c._on_json({'type': 'stt', 'text': '播放孙燕姿的歌'})
+    assert c.state == 'thinking' and not c.uploading
+    await c._on_json({'type': 'wake_ready'})  # late acknowledgement cannot reopen a real turn
+    assert c.state == 'thinking' and not c.uploading
 
 
 @pytest.mark.asyncio
