@@ -26,6 +26,8 @@ States shown to the page: idle, connecting, listening, thinking, speaking.
   through device tools. A ring lights the screen, switches the speaker to the alarm volume until it
   stops (the wake word, 停止 or 再睡 on the page; given up on after 10 minutes, a reminder (its chime and words over and over) after 3) and stops whatever
   the conversation was doing. The volume keys then change only that ring's volume.
+- Bluetooth speaker (bt.py): a phone's music is mixed under the replies, lowered from the wake to the
+  end of the reply, muted while an alarm rings (the phone is asked to pause then and is not resumed).
 """
 import asyncio
 import collections
@@ -41,7 +43,7 @@ from pathlib import Path
 import aiohttp
 import numpy as np
 
-from . import alarms, config, mcp, sleep, update, wake_verify
+from . import alarms, bt, config, mcp, sleep, update, wake_verify
 from .audio import OUT_RATE, Audio, load_wav
 from .device import DIM_LEVEL, Keys, Screen, normalize_screen_off
 from .hub import Hub
@@ -75,6 +77,7 @@ ALARM_VOLUME = 70        # the alarms' own volume until the user sets one
 TTS_TIMEOUT = 30         # seconds for the hub to synthesise a reminder's words
 PREVIEW_SECONDS = 8      # the settings' 试听 plays at most this much of a tone
 CLIP_GAP = 0.8           # seconds of silence after each spoken reminder in a ring
+BACKGROUND_DUCKED = 0.2  # a phone's music (Bluetooth speaker) under a conversation
 
 # Hub vendor id -> (logo file, company). Unknown vendors are guessed from the model name.
 VENDORS = {
@@ -260,6 +263,7 @@ class Client:
             level = ALARM_VOLUME
         self.alarm_volume = max(0, min(100, int(level)))
         self.alarm_tone = cfg.get('alarm_tone') if cfg.get('alarm_tone') in alarms.TONES else alarms.DEFAULT_TONE
+        self.bt = bt.Bluetooth(self.audio.background, self.events.publish, cfg.get('bluetooth') is not False)
 
     # ---- startup ----
 
@@ -275,6 +279,8 @@ class Client:
         asyncio.create_task(self._model_poller())
         asyncio.create_task(self._report_poller())
         asyncio.create_task(self._alarm_loop())
+        await self.bt.start()
+        asyncio.create_task(self._bluetooth_loop())
 
     # ---- microphone (worker thread) ----
 
@@ -363,6 +369,7 @@ class Client:
 
     def snapshot(self):
         return {'status': self.status(), 'models': self.models, 'alarms': self.alarm_view(),
+                'bluetooth': self.bt.view(),
                 'thread': {'entry': self.view_entry(), 'messages': self.threads.get(self.view_entry(), [])},
                 'music': self.music.view() if hasattr(self, 'music') else None}
 
@@ -1164,6 +1171,44 @@ class Client:
                 pass   # its shielded _release_speaker has put the volume back
 
     # ---- countdowns, alarms and reminders (alarms.py) ----
+
+    # ---- Bluetooth speaker (bt.py) ----
+
+    def background_target(self):
+        """How loud a phone's music plays: muted while an alarm rings or a tone is tried, lowered while
+        talking (from the wake to the end of the reply) or a local sound plays, else full."""
+        # a preview that played to its end stays in self.preview (finished) until the next one:
+        # only one still playing mutes the phone
+        if self.ring or (self.preview and not self.preview.done()):
+            return 0.0
+        if self.state != 'idle' or self.audio.player.buffered() > 0:
+            return BACKGROUND_DUCKED
+        return 1.0
+
+    async def _bluetooth_loop(self):
+        paused_for = None   # the ring the phones were asked to pause for
+        while True:
+            await asyncio.sleep(0.1)
+            self.audio.background.target = self.background_target()
+            if self.ring and self.ring is not paused_for:
+                paused_for = self.ring
+                if self.bt.streaming():
+                    log.info('alarm: asking the phone to pause')
+                    await self.bt.pause()   # it doesn't resume by itself: the user plays on from the phone
+
+    async def bluetooth(self, enabled=None, window=None, remove=None, disconnect=None):
+        """The page's Bluetooth controls: the switch (stored), the "add a phone" window, forgetting a phone."""
+        ok = True
+        if enabled is not None:
+            ok = await self.bt.set_enabled(bool(enabled))
+            config.save(bluetooth=bool(enabled))
+        if window is not None:
+            ok = await self.bt.open_window(bool(window))
+        if remove:
+            ok = await self.bt.remove(remove)
+        if disconnect:
+            ok = await self.bt.disconnect(disconnect)
+        return ok
 
     def alarm_view(self):
         now = time.time()

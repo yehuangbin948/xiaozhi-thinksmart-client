@@ -3,7 +3,7 @@ import numpy as np
 import pytest
 import test_barge_in
 from thinksmart_client import music,mcp
-from thinksmart_client.audio import Audio,Player
+from thinksmart_client.audio import Audio,Player,Background
 
 def player(blocked=lambda:False):
     audio=types.SimpleNamespace(music_player=Player(),music_enabled=False)
@@ -83,12 +83,40 @@ async def test_stop_with_full_decoder_pipe_returns_mcp_reply(monkeypatch,held):
 
 def test_output_mixes_music_and_sends_actual_output_to_echo_canceller():
     a=Audio.__new__(Audio);a.player=Player();a.music_player=Player();a.music_enabled=True
+    a.background=Background()
     a.player.push(np.full((20,2),.25,np.float32));a.music_player.push(np.full((20,2),.5,np.float32))
     captured=[];a.aec=types.SimpleNamespace(feed_far=lambda data:captured.append(data.copy()))
     a.last_out=0
     out=np.zeros((20,2),np.float32)
     a._out_cb(out,20,None,None)
     np.testing.assert_allclose(out,.75);np.testing.assert_array_equal(out,captured[0])
+
+@pytest.mark.parametrize('music_enabled,expected',[(True,.75),(False,.5)])
+def test_bluetooth_and_netease_mix_independently_and_aec_hears_both(music_enabled,expected):
+    a=Audio.__new__(Audio);a.player=Player();a.music_player=Player()
+    a.background=Background();a.music_enabled=music_enabled
+    n=960
+    a.player.push(np.full((n,2),.25,np.float32))
+    a.music_player.push(np.full((n,2),.25,np.float32))
+    a.background.push(np.full((4800,2),.25,np.float32))
+    captured=[];a.aec=types.SimpleNamespace(feed_far=lambda data:captured.append(data.copy()))
+    out=np.zeros((n,2),np.float32)
+    a._out_cb(out,n,None,None)
+    np.testing.assert_allclose(out,expected)
+    np.testing.assert_array_equal(out,captured[0])
+    assert (a.music_player.buffered()>0) is (not music_enabled)
+
+def test_mixed_output_is_clipped_only_after_all_sources_are_added():
+    a=Audio.__new__(Audio);a.player=Player();a.music_player=Player();a.music_enabled=True
+    a.background=Background();n=960
+    a.player.push(np.full((n,2),.8,np.float32))
+    a.music_player.push(np.full((n,2),.8,np.float32))
+    a.background.push(np.full((4800,2),-.5,np.float32))
+    captured=[];a.aec=types.SimpleNamespace(feed_far=lambda data:captured.append(data.copy()))
+    out=np.zeros((n,2),np.float32)
+    a._out_cb(out,n,None,None)
+    np.testing.assert_allclose(out,1.)
+    np.testing.assert_array_equal(out,captured[0])
 
 @pytest.mark.asyncio
 async def test_internal_transport_delegates_to_music():
