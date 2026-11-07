@@ -63,7 +63,7 @@ def make_app(client: Client):
             return web.json_response({'ok': False, 'error': '不支持的音乐操作'}, status=400)
         if not await client.ensure_connected():
             return web.json_response({'ok': False, 'error': '连不上网关'}, status=503)
-        client.set_state('idle')
+        if client.state == 'connecting': client.set_state('idle')
         try:
             await asyncio.wait_for(client.tools_listed.wait(), 6)
             return web.json_response(await client._hub_http('/kiosk/music',

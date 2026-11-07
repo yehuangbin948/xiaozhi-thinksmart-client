@@ -16,10 +16,11 @@ def test_music_rejects_non_netease_urls(url):assert not music.valid_url(url)
 
 def test_music_holds_without_discarding_buffer_and_view_never_contains_url():
     held=[False]
-    p,_=player(lambda:held[0]);p.playing=True;p.track={'title':'测试','url':'should-not-be-in-view'}
+    p,events=player(lambda:held[0]);p.playing=True;p.track={'title':'测试','url':'should-not-be-in-view'}
     p.audio.music_player.push(np.ones((4800,2),dtype=np.float32))
     p.refresh();assert p.audio.music_enabled
     held[0]=True;p.refresh();assert not p.audio.music_enabled
+    assert events[-1][0]=='music' and events[-1][1]['held']
     assert p.audio.music_player.buffered()==.1
     assert 'url' not in p.view()['track']
 
@@ -61,3 +62,22 @@ async def test_internal_transport_delegates_to_music():
     p,_=player()
     result=await mcp.handle({'jsonrpc':'2.0','id':77,'method':'tools/call','params':{'name':'self.music.transport','arguments':{'action':'status'}}},types.SimpleNamespace(music=p))
     assert result['result']['isError'] is False
+
+@pytest.mark.asyncio
+async def test_music_button_preserves_active_conversation_state():
+    from unittest.mock import MagicMock,AsyncMock
+    from thinksmart_client.web import make_app
+    client=MagicMock()
+    client.state='speaking';client.cfg={'device_id':'test-device'}
+    client.ensure_connected=AsyncMock(return_value=True)
+    client.tools_listed=asyncio.Event();client.tools_listed.set()
+    client._hub_http=AsyncMock(return_value={'ok':True})
+    app=make_app(client)
+    handler=next(r.handler for r in app.router.routes() if r.resource.canonical=='/api/music')
+    request=types.SimpleNamespace(json=AsyncMock(return_value={'action':'pause'}))
+    response=await handler(request)
+    assert response.status==200
+    client.set_state.assert_not_called()
+    client.state='connecting'
+    await handler(request)
+    client.set_state.assert_called_once_with('idle')

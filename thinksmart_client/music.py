@@ -27,6 +27,7 @@ class Music:
         self.samples = 0
         self.error = ''
         self.ended = False
+        self._held = None
 
     def view(self):
         queued = self.audio.music_player.buffered()
@@ -38,7 +39,11 @@ class Music:
     def emit(self): self.publish('music', self.view())
 
     def refresh(self):
-        self.audio.music_enabled = bool(self.playing and not self.blocked())
+        held = bool(self.playing and self.blocked())
+        self.audio.music_enabled = bool(self.playing and not held)
+        if held != self._held:
+            self._held = held
+            self.emit()
 
     async def stop(self):
         self.playing = False
