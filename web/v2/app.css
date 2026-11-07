@@ -406,3 +406,35 @@ body[data-state="listening"] .mic-ring { opacity: .75; }
 .music-panel>b { font-size:20px; overflow-wrap:anywhere; }
 .music-actions { display:flex; justify-content:center; flex-wrap:wrap; gap:8px; margin-top:8px; }
 .music-actions button { min-height:42px; padding:8px 13px; border:1px solid var(--line); border-radius:12px; background:var(--card); color:var(--ink); font:inherit; font-size:15px; cursor:pointer; }
+
+/* ==== Noah buddy skin v2 (patched): body stays still, only the head moves ====
+   Two stacked cut-outs inside .orb: buddy-body.png (never moves) and buddy-head.png
+   (all state motion). Speaking/listening head scale is driven by app.js drawLive
+   through #buddyHead's inline transform; CSS owns the other states. */
+.face { display: none; }
+.core i, .core b { display: none; }
+.core { background: transparent; }
+.buddy { position: absolute; left: 50%; top: 50%; width: 272px; height: 348px; z-index: 2;
+         transform: translate(-50%, -52%); pointer-events: none; }
+.buddy img { position: absolute; inset: 0; width: 100%; height: 100%; }
+.buddy-body { filter: drop-shadow(0 16px 22px rgba(0,0,0,.45)); transition: filter .5s; }
+.buddy-head { transform-origin: 50% 72%; transition: filter .5s; will-change: transform; }
+/* idle: a slow, small nod of the head only */
+body[data-state="idle"] .buddy-head { animation: headBob 4.6s ease-in-out infinite; }
+@keyframes headBob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(4px); } }
+/* connecting: looking left and right (starts and ends at neutral so entering the state never snaps) */
+body[data-state="connecting"] .buddy-head { animation: headSway 2.6s ease-in-out infinite; }
+@keyframes headSway { 0%, 100% { transform: rotate(0deg) translateX(0); } 25% { transform: rotate(-3deg) translateX(-5px); } 75% { transform: rotate(3deg) translateX(5px); } }
+/* listening: head leans in a little, cyan glow (voice scale from drawLive adds on top) */
+body[data-state="listening"] .buddy-head { filter: drop-shadow(0 10px 24px rgba(40,212,255,.55)) brightness(1.05); }
+body[data-state="listening"] .buddy-body { filter: drop-shadow(0 16px 26px rgba(40,212,255,.35)); }
+/* thinking: head tilts to the side (held pose as an animation, no static-transform handoff) */
+body[data-state="thinking"] .buddy-head { animation: headTilt 3.4s ease-in-out infinite; }
+@keyframes headTilt { 0%, 100% { transform: rotate(-4deg) translate(-4px, -2px); } 50% { transform: rotate(-3.3deg) translate(-3px, -1px); } }
+/* speaking: blue glow; the scale itself comes from drawLive (voice level) */
+body[data-state="speaking"] .buddy-head { filter: drop-shadow(0 10px 24px rgba(95,123,255,.5)) brightness(1.04); }
+body[data-state="speaking"] .buddy-body { filter: drop-shadow(0 16px 26px rgba(95,123,255,.3)); }
+/* mic off: head droops, everything dims (held pose as an animation too) */
+body.mic-off[data-state="idle"] .buddy-head { animation: headDroop 5.2s ease-in-out infinite; filter: brightness(.72); }
+@keyframes headDroop { 0%, 100% { transform: rotate(3.5deg) translateY(5px); } 50% { transform: rotate(3.5deg) translateY(6.5px); } }
+body.mic-off[data-state="idle"] .buddy-body { filter: brightness(.8) drop-shadow(0 12px 18px rgba(0,0,0,.4)); }

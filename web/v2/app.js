@@ -166,6 +166,7 @@ function levelLoop(now) {
     level.raf = 0;
     level.target = level.value = 0;
     $('corona').style.transform = $('core').style.transform = $('micRing').style.transform = $('mouth').style.transform = '';
+    const bh = $('buddyHead'); if (bh) bh.style.transform = '';
   }
 }
 // The whole corona layer grows with the level too (compositor only, no repaint): with the longer bars,
@@ -173,6 +174,7 @@ function levelLoop(now) {
 function drawLive(v, p) {
   $('corona').style.transform = `scale(${(1 + v * .16).toFixed(3)})`;
   $('core').style.transform = `scale(${(1 + v * .13).toFixed(3)})`;
+  const bh = $('buddyHead'); if (bh) bh.style.transform = `scale(${(1 + v * .055).toFixed(3)})`;
   $('mouth').style.transform = `scaleY(${(.55 + v * 1.6).toFixed(3)})`;
   if (level.state === 'listening') $('micRing').style.transform = `scale(${(1 + v * .16).toFixed(3)})`;   // invisible otherwise
   const pending = $('pending');
