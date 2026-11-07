@@ -177,11 +177,16 @@ async def handle(payload, client=None):
         return result({'protocolVersion': '2024-11-05', 'capabilities': {'tools': {}},
                        'serverInfo': {'name': 'thinksmart-client', 'version': '0.1.0'}})
     if method == 'tools/list':
-        return result({'tools': TOOLS})
+        return result({'tools': TOOLS + [{'name': 'self.music.transport',
+            'description': 'Internal transport for the managed NetEase plugin.',
+            'inputSchema': {'type': 'object', 'properties': {'action': {'type': 'string'},
+                           'track': {'type': 'object'}}, 'required': ['action']}}]})
     if method == 'tools/call':
         name, args = params.get('name'), params.get('arguments') or {}
         try:
-            if name == 'self.audio_speaker.set_volume' and client:
+            if name == 'self.music.transport' and client:
+                text = _dumps(await client.music.control(args))
+            elif name == 'self.audio_speaker.set_volume' and client:
                 text = json.dumps({'success': True, 'volume': await client.set_volume(args['volume'], 'voice')})
             elif name == 'self.audio_speaker.get_volume' and client:
                 text = json.dumps({'volume': await client.device_volume()})

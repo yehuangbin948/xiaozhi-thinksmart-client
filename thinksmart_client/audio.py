@@ -158,6 +158,8 @@ class Audio:
     def __init__(self, on_block):
         self.on_block = on_block          # called on the worker thread: on_block(block, wake_block), 20 ms
         self.player = Player()
+        self.music_player = Player()
+        self.music_enabled = False
         self.aec = Aec(MIC_RATE, OUT_RATE)
         self.mic_level = 0.0
         # Echo cancellation costs ~21% of a core, so it runs only during a conversation
@@ -194,6 +196,8 @@ class Audio:
         if status and len(self.player.late) < 100:
             self.player.late.append(str(status))
         outdata[:] = self.player.pull(frames)
+        if self.music_enabled:
+            outdata[:] = np.clip(outdata + self.music_player.pull(frames), -1, 1)
         self.aec.feed_far(outdata)
 
     def _work(self):
@@ -201,7 +205,7 @@ class Audio:
             block = raw = self._q.get()
             self.last_in = time.monotonic()
             wake_block = None
-            since_sound = time.monotonic() - self.player.last_sound
+            since_sound = time.monotonic() - max(self.player.last_sound, self.music_player.last_sound)
             if self.aec_hold or since_sound < 3:
                 try:
                     block = self.aec.process_near(block)

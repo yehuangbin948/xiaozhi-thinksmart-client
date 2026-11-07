@@ -868,8 +868,30 @@ function showVolume(v) {
   hudTimer = setTimeout(() => $('hud').classList.remove('on'), 1600);
 }
 
+/* ---- managed NetEase music ---- */
+function renderMusic(m) {
+  ui.music = m;
+  $('musicPanel').hidden = !m || !m.track;
+  if (!m || !m.track) return;
+  $('musicTitle').textContent = m.track.title || '网易云音乐';
+  $('musicArtist').textContent = m.track.artist || '';
+  const seconds = Math.floor(m.position || 0);
+  $('musicState').textContent = m.error || (m.ended ? '已播完' : m.held ? '对话中，稍后继续' : m.playing ? '播放中' : '已暂停') + ' ' + Math.floor(seconds / 60) + ':' + String(seconds % 60).padStart(2, '0');
+  $('musicToggle').dataset.musicAction = m.playing ? 'pause' : 'resume';
+  $('musicToggle').textContent = m.playing ? '暂停' : '继续';
+  $('musicToggle').disabled = Boolean(m.ended);
+}
+$('musicPanel').addEventListener('click', async e => {
+  const button = e.target.closest('[data-music-action]');
+  if (!button) return;
+  button.disabled = true;
+  try { await postJson('/api/music', { action: button.dataset.musicAction }); }
+  finally { button.disabled = button.id === 'musicToggle' && Boolean(ui.music && ui.music.ended); }
+});
+
 /* ---- events from the client ---- */
 const handlers = {
+  music(m) { renderMusic(m); },
   snapshot(s) {
     if (ui.build && s.build && s.build !== ui.build) return location.reload();   // client restarted (deployed)
     ui.build = s.build;
@@ -879,6 +901,7 @@ const handlers = {
     seenThreads[s.thread.entry] = s.thread.messages;
     if (s.update) { ui.version = s.version; ui.update = s.update; }   // the demo's snapshots have none
     if (s.alarms) ui.alarms = s.alarms;
+    renderMusic(s.music);
     renderModels(); renderThread(); renderStatus(); renderAlarms();
     updateFinished((s.update || {}).job);
   },

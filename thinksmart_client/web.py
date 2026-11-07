@@ -57,6 +57,20 @@ def make_app(client: Client):
         asyncio.create_task(client.say(body.get('text', '')))
         return web.json_response({'ok': True})
 
+    async def music_control(request):
+        body = await request.json()
+        if body.get('action') not in ('pause', 'resume', 'next', 'previous', 'stop'):
+            return web.json_response({'ok': False, 'error': '不支持的音乐操作'}, status=400)
+        if not await client.ensure_connected():
+            return web.json_response({'ok': False, 'error': '连不上网关'}, status=503)
+        client.set_state('idle')
+        try:
+            await asyncio.wait_for(client.tools_listed.wait(), 6)
+            return web.json_response(await client._hub_http('/kiosk/music',
+                {'action': body['action'], 'device': client.cfg['device_id']}))
+        except (OSError, asyncio.TimeoutError):
+            return web.json_response({'ok': False, 'error': '音乐服务暂时无法连接'}, status=503)
+
     async def model(request):
         body = await request.json()
         return web.json_response(await client.set_model(body.get('kind'), body.get('vendor'), body.get('entry')))
@@ -172,6 +186,7 @@ def make_app(client: Client):
     app.router.add_post('/api/ptt/stop', action(client.ptt_stop))
     app.router.add_post('/api/model', model)
     app.router.add_post('/api/text', text)
+    app.router.add_post('/api/music', music_control)
     app.router.add_post('/api/sleep', sleep_setting)
     app.router.add_post('/api/brightness', brightness)
     app.router.add_post('/api/screen-off', screen_off)

@@ -399,3 +399,10 @@ body[data-state="listening"] .mic-ring { opacity: .75; }
 
 /* ?demo=<scene>&still: freeze transitions so headless screenshots show the settled scene */
 .still *, .still *::before, .still *::after { transition: none !important; animation: none !important; }
+/* Managed NetEase plugin: only shown while a track is loaded. */
+.music-panel[hidden] { display:none; }
+.music-panel { width:min(440px,90%); margin:10px auto; padding:14px 18px; border:1px solid var(--line); border-radius:18px; background:var(--card2); display:grid; gap:5px; text-align:center; }
+.music-panel small,.music-panel>span { font-size:14px; color:var(--ink2); }
+.music-panel>b { font-size:20px; overflow-wrap:anywhere; }
+.music-actions { display:flex; justify-content:center; flex-wrap:wrap; gap:8px; margin-top:8px; }
+.music-actions button { min-height:42px; padding:8px 13px; border:1px solid var(--line); border-radius:12px; background:var(--card); color:var(--ink); font:inherit; font-size:15px; cursor:pointer; }

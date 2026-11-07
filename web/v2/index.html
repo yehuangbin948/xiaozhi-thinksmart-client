@@ -66,6 +66,16 @@
       </div>
       <h1 class="title" id="title">说<em>「小麦小麦」</em></h1>
       <p class="hint" id="hint">或者点麦克风；按住可以直接说</p>
+      <section class="music-panel" id="musicPanel" hidden aria-label="网易云音乐播放器">
+        <small>网易云音乐 · <span id="musicState"></span></small>
+        <b id="musicTitle"></b><span id="musicArtist"></span>
+        <div class="music-actions">
+          <button data-music-action="previous" aria-label="上一首">上一首</button>
+          <button id="musicToggle" data-music-action="pause">暂停</button>
+          <button data-music-action="next" aria-label="下一首">下一首</button>
+          <button data-music-action="stop" aria-label="停止音乐">停止</button>
+        </div>
+      </section>
       <div class="controls">
         <button class="ctl" id="btnAbort" aria-label="打断">
           <svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1.4"/><rect x="14" y="5" width="4" height="14" rx="1.4"/></svg>

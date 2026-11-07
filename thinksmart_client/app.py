@@ -204,6 +204,10 @@ class Client:
         self.verifier = wake_verify.make(cfg['wake_verify'], cfg['wake_words'], cfg['hub_http'])
         self.backlog = None           # mic blocks since a wake word hit, uploaded once listening starts
         self.audio = Audio(self._on_block)
+        from .music import Music
+        self.music = Music(self.audio, self.events.publish,
+                           lambda: self.state != 'idle' or bool(self.ring) or bool(self.preview)
+                           or self.audio.player.buffered() > .03)
         self.hub = Hub(cfg['hub_ws'], cfg['device_id'], cfg['client_id'], cfg['token'],
                        self._on_json, self._on_audio, self._on_closed)
         sounds = ROOT / 'web' / 'sounds'
@@ -320,6 +324,7 @@ class Client:
             else:
                 self.screen.hold()
         self.events.publish('state', self.status())
+        if hasattr(self, 'music'): self.music.refresh()
 
     def status(self):
         return {'state': self.state, 'connected': self.hub.connected, 'uploading': self.uploading,
@@ -350,7 +355,8 @@ class Client:
 
     def snapshot(self):
         return {'status': self.status(), 'models': self.models, 'alarms': self.alarm_view(),
-                'thread': {'entry': self.view_entry(), 'messages': self.threads.get(self.view_entry(), [])}}
+                'thread': {'entry': self.view_entry(), 'messages': self.threads.get(self.view_entry(), [])},
+                'music': self.music.view() if hasattr(self, 'music') else None}
 
     def view_entry(self):
         cur = self.models.get('current')
@@ -680,7 +686,11 @@ class Client:
                     self.events.publish('toast', {'kind': 'error', 'text': '网络还没连上，稍后再试' if not has_default_route()
                                                   else '没收到回答，可能是网络或模型服务连不上，稍后再试'})
                 self.bot_msg = self.question = None
-                if self.listen_after_reply:
+                if getattr(self, 'music', None) and self.music.playing:
+                    self.uploading = self.listen_after_reply = False
+                    self.deadline = None
+                    self.set_state('idle')
+                elif self.listen_after_reply:
                     asyncio.create_task(self._listen_after_reply())
                 elif self.uploading:
                     self.heard = True
