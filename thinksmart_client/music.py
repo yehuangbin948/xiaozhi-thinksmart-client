@@ -2,6 +2,7 @@
 No sound device is opened here, and no media or authenticated URL is persisted.
 """
 import asyncio
+import logging
 import shutil
 from urllib.parse import urlsplit
 
@@ -9,6 +10,31 @@ import numpy as np
 
 RATE = 48000
 CHUNK = 4800 * 2 * 4
+EXIT_TIMEOUT = 2
+log = logging.getLogger(__name__)
+
+async def _close_decoder(proc):
+    # A held/paused player stops reading PCM. Waiting for process exit with a
+    # full stdout pipe can deadlock even after SIGKILL. Drain and discard it
+    # concurrently, without accumulating a song in memory.
+    async def discard():
+        if proc.stdout is not None:
+            while await proc.stdout.read(65536): pass
+    drain = asyncio.create_task(discard())
+    try:
+        for method in ('terminate', 'kill'):
+            if proc.returncode is None:
+                try: getattr(proc, method)()
+                except ProcessLookupError: pass
+            try:
+                await asyncio.wait_for(proc.wait(), EXIT_TIMEOUT)
+                break
+            except asyncio.TimeoutError: continue
+        else:
+            log.warning('Music decoder exit timed out')
+    finally:
+        try: await asyncio.wait_for(drain, EXIT_TIMEOUT)
+        except (asyncio.TimeoutError, OSError): pass
 
 def valid_url(url):
     try:
@@ -115,13 +141,8 @@ class Music:
             self.error = '音乐播放失败，请重新点歌或检查网络'
             self.playing = False
         finally:
-            if proc and proc.returncode is None:
-                try: proc.terminate()
-                except ProcessLookupError: pass
-                try: await asyncio.wait_for(proc.wait(), 3)
-                except asyncio.TimeoutError:
-                    try: proc.kill()
-                    except ProcessLookupError: pass
-                    await proc.wait()
-            self.proc = None
-            self.refresh(); self.emit()
+            try:
+                if proc: await _close_decoder(proc)
+            finally:
+                self.proc = None
+                self.refresh(); self.emit()

@@ -1,4 +1,4 @@
-import asyncio,types
+import asyncio,types,sys
 import numpy as np
 import pytest
 import test_barge_in
@@ -47,6 +47,39 @@ async def test_stop_cancels_decoder_and_clears_only_music_buffer():
     await p.stop()
     assert old.cancelled() and p.track is None and not p.playing
     assert p.audio.music_player.buffered()==0
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('held',[False,True])
+async def test_stop_with_full_decoder_pipe_returns_mcp_reply(monkeypatch,held):
+    p,_=player(lambda:held)
+    original=asyncio.create_subprocess_exec
+    children=[]
+    async def spawn(*args,**kwargs):
+        proc=await original(sys.executable,'-c',
+            'import os,signal;signal.signal(signal.SIGTERM,signal.SIG_IGN)\nwhile True:os.write(1,b"\\0"*65536)',
+            stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.DEVNULL,limit=4096)
+        children.append(proc);return proc
+    monkeypatch.setattr(music.asyncio,'create_subprocess_exec',spawn)
+    monkeypatch.setattr(music,'EXIT_TIMEOUT',.1)
+    p.playing=True;p.track={'id':1};p.task=asyncio.create_task(p._pump('fake','unused'))
+    pump=p.task
+    try:
+        async def full_pipe():
+            while not children or not children[0].stdout._paused: await asyncio.sleep(.01)
+        await asyncio.wait_for(full_pipe(),2)
+        result=await asyncio.wait_for(mcp.handle({'jsonrpc':'2.0','id':78,'method':'tools/call',
+            'params':{'name':'self.music.transport','arguments':{'action':'stop'}}},types.SimpleNamespace(music=p)),2)
+        assert not result['result']['isError']
+        assert p.track is None and p.proc is None and pump.done()
+        assert children[0].returncode is not None
+        assert not p.playing and p.audio.music_player.buffered()==0
+    finally:
+        for proc in children:
+            if proc.returncode is None:proc.kill()
+            await asyncio.wait_for(proc.stdout.read(),2)
+            await asyncio.wait_for(proc.wait(),2)
+        if not pump.done():pump.cancel()
+        await asyncio.gather(pump,return_exceptions=True)
 
 def test_output_mixes_music_and_sends_actual_output_to_echo_canceller():
     a=Audio.__new__(Audio);a.player=Player();a.music_player=Player();a.music_enabled=True
